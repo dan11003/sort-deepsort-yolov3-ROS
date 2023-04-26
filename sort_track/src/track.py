@@ -12,7 +12,7 @@ import vision_msgs
 from vision_msgs.msg import Detection2DArray
 from vision_msgs.msg import *
 from sensor_msgs.msg import CompressedImage
-
+from sort import preprocessing
 
 
 def get_parameters():
@@ -28,91 +28,6 @@ def get_parameters():
     max_age = rospy.get_param('~max_age')
     return (camera_topic, detection_topic, tracker_topic, cost_threhold, max_age, min_hits)
 
-
-
-"""
-def callback_image(data):
-    print("callback_image begin")
-    #Display Image
-    #bridge = CvBridge()
-    #cv_rgb = bridge.imgmsg_to_cv2(data, "bgr8")
-    np_arr = np.fromstring(data.data, np.uint8)
-    cv_rgb = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    #TO DO: FIND BETTER AND MORE ACCURATE WAY TO SHOW BOUNDING BOXES!!
-    #Detection bounding box
-
-    #print(len(detections))
-    #print(detections)
-    if(len(detections) > 0):
-        for i in range(detections.shape[0]):
-            #print("idx: " + str(i))
-            print(detections[i][0])
-            print(detections[i][1])
-            print(detections[i][2])
-            print(detections[i][3])
-            print(detections[i][4])
-
-
-            cv2.rectangle(cv_rgb, (int(detections[i][0]), int(detections[i][1])), (int(detections[i][2]), int(detections[i][3])), (100, 255, 50), 1)
-            cv2.putText(cv_rgb , "person", (int(detections[i][0]), int(detections[i][1])), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (100, 255, 50), lineType=cv2.LINE_AA)
-    #Tracker bounding box
-    #cv2.rectangle(cv_rgb, (track[0][0], self.track[0][1]), (track[0][2], self.track[0][3]), (255, 255, 255), 1)
-
-    #cv2.putText(cv_rgb , str(track[0][4]), (track[0][2], self.track[0][1]), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), lineType=cv2.LINE_AA)
-    cv2.imshow("YOLO+SORT", cv_rgb)
-    cv2.waitKey(3)
-    print("callback_image end")
-
-
-def Detections(data):
-    print("callbackVisionmsgDetection2dArray begin")
-    #print(len(data.detections))
-    #detections = np.array((0,5),dtype=numpy.float)
-    global detections
-    global self.trackers
-    global self.track
-    detections = []
-    self.trackers = []
-    self.track = []
-    detectionsAggregate = []
-    for detection in data.detections:
-        bbox = detection.bbox
-        confidence = round(float(detection.results[0].score),2)
-        detectionsAggregate.append(np.array([int(bbox.center.x-bbox.size_x), int(bbox.center.y-bbox.size_y), int(bbox.center.x+bbox.size_x), int(bbox.center.y+bbox.size_y), confidence]))
-    #print("got: " +str(len(detectionsAggregate)))
-
-
-
-    if(len(detectionsAggregate) > 0):
-        detections = np.array(detectionsAggregate)
-        self.trackers = self.tracker.update(detections)
-        self.trackers = np.array(trackers, dtype='int')
-        self.track = self.trackers
-        msg.data = self.track
-    else:
-        detections = np.array([])
-    print("callbackVisionmsgDetection2dArray end")
-    """
-
-
-"""def callback_det(data):
-    print("callback")
-    print(len(data.detections))
-    global detections
-    global self.trackers
-    global self.track
-    detections = []
-    self.trackers = []
-    self.track = []
-    for box in data.bounding_boxes:
-        detections.append(np.array([box.xmin, box.ymin, box.xmax, box.ymax, round(box.probability,2)]))
-
-    detections = np.array(detections)
-    self.trackers = self.tracker.update(detections)
-    self.trackers = np.array(trackers, dtype='int')
-    self.track = self.trackers
-    msg.data = self.track
-"""
 
 class MultiObjectTracker:
 
@@ -131,8 +46,6 @@ class MultiObjectTracker:
 
         self.pub_trackers = rospy.Publisher(tracker_topic, IntList, queue_size=10)
         self.msg = IntList()
-
-
 
 
     def SyncedCallback(self,detectMsg, imageMsg):
