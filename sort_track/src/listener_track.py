@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python3
 
 #Listen to message published by sort tracker (Bounding boxe of tracked object and ID)
 _

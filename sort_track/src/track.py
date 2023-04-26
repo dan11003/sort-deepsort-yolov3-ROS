@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python3
 
 """
 ROS node to track objects using SORT TRACKER and YOLOv3 detector (darknet_ros)
