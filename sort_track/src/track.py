@@ -67,7 +67,7 @@ class MultiObjectTracker:
         for detection in detectMsg.detections:
             bbox = detection.bbox
             confidence = round(float(100*detection.results[0].score),2)
-            listDetections.append(np.array([int(bbox.center.x-bbox.size_x), int(bbox.center.y-bbox.size_y), int(bbox.center.x+bbox.size_x), int(bbox.center.y+bbox.size_y), confidence]))
+            listDetections.append(np.array([int(bbox.center.x-bbox.size_x), int(bbox.center.y-bbox.size_y), int(bbox.center.x+bbox.size_x), int(bbox.center.y+bbox.size_y), confidence, detection.results[0].id]))
 
 
         #scores_new = np.array([d.confidence for d in detections_new])
@@ -79,7 +79,7 @@ class MultiObjectTracker:
             boxes = detections[:,0:4]#np.array([d.tlwh for d in detections])
             confidence = detections[:,4]
 
-            indices = prep.non_max_suppression(boxes, 0.5 , confidence)
+            indices = prep.non_max_suppression(boxes, 0.9 , confidence)
             detectionsFiltered = [detections[i] for i in indices]
             detections = np.array(detectionsFiltered)
 
@@ -103,8 +103,8 @@ class MultiObjectTracker:
                     #TO DO: FIND BETTER AND MORE ACCURATE WAY TO SHOW BOUNDING BOXES!!
         if self.vis_detections:
             for i in range(detections.shape[0]):
-                cv2.rectangle(cv_rgb, (int(detections[i][0]), int(detections[i][1])), (int(detections[i][2]), int(detections[i][3])), (100, 255, 50), 1)
-                cv2.putText(cv_rgb , "person", (int(detections[i][0]), int(detections[i][1])), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (100, 255, 50), lineType=cv2.LINE_AA)
+                cv2.rectangle(cv_rgb, (int(detections[i][0]), int(detections[i][1])), (int(detections[i][2]), int(detections[i][3])), COLORS[detections[i][5]], 1)
+                cv2.putText(cv_rgb , CLASSES[detections[i][5]], (int(detections[i][0]), int(detections[i][1])), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (100, 255, 50), lineType=cv2.LINE_AA)
         #Tracker bounding box
         if self.vis_tracked_objects:
             for i in range(self.track.shape[0]):
