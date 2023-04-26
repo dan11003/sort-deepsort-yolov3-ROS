@@ -25,7 +25,9 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from skimage import io
 #from sklearn.utils.linear_assignment_ import linear_assignment
-from scipy.optimize import linear_sum_assignment as linear_assignment
+#   from scipy.optimize import linear_sum_assignment as linear_assignment
+from scipy.optimize import linear_sum_assignment
+
 import glob
 import time
 import argparse
@@ -146,7 +148,11 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
   for d,det in enumerate(detections):
     for t,trk in enumerate(trackers):
       iou_matrix[d,t] = iou(det,trk)
-  matched_indices = linear_assignment(-iou_matrix)
+  #print(-iou_matrix)
+  #matched_indices = linear_assignment(-iou_matrix)
+  matched_indices = linear_sum_assignment(-iou_matrix)
+  matched_indices = np.array(list(zip(*matched_indices)))
+
 
   unmatched_detections = []
   for d,det in enumerate(detections):
@@ -193,6 +199,7 @@ class Sort(object):
 
     NOTE: The number of objects returned may differ from the number of detections provided.
     """
+
     self.frame_count += 1
     #get predicted locations from existing trackers.
     trks = np.zeros((len(self.trackers),5))
@@ -206,6 +213,7 @@ class Sort(object):
     trks = np.ma.compress_rows(np.ma.masked_invalid(trks))
     for t in reversed(to_del):
       self.trackers.pop(t)
+    #print("sort 210")
     matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets,trks)
 
     #update matched trackers with assigned detections

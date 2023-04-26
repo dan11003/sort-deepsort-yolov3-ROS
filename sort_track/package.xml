@@ -58,6 +58,9 @@
   <build_export_depend>std_msgs</build_export_depend>
   <build_export_depend>sensor_msgs</build_export_depend>
   <depend>cv_bridge</depend>
+  <depend>vision_msgs</depend>
+
+
   <!-- <depend>sort_track_msgs</depend> -->
   <exec_depend>roscpp</exec_depend>
   <exec_depend>rospy</exec_depend>
