@@ -18,7 +18,7 @@ visualize_detections: true
 visualize_tracked_objects: true
 
 # max age
-max_age: 8
+max_age: 20
 
 image_view:
 
