@@ -12,10 +12,13 @@ tracker_topic: "/sort_track"
 cost_threhold: 15
 
 # min_hits
-min_hits: 1
+min_hits: 5
+
+visualize_detections: true
+visualize_tracked_objects: true
 
 # max age
-max_age: 5
+max_age: 8
 
 image_view:
 

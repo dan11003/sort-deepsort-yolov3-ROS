@@ -12,28 +12,41 @@ import vision_msgs
 from vision_msgs.msg import Detection2DArray
 from vision_msgs.msg import *
 from sensor_msgs.msg import CompressedImage
-from sort import preprocessing
+from deep_sort import preprocessing as prep
 
 
-def get_parameters():
-    """
-    Gets the necessary parameters from .yaml file
-    Returns tuple
-    """
-    camera_topic = rospy.get_param("~camera_topic")
-    detection_topic = rospy.get_param("~detection_topic")
-    tracker_topic = rospy.get_param('~tracker_topic')
-    cost_threhold = rospy.get_param('~cost_threhold')
-    min_hits = rospy.get_param('~min_hits')
-    max_age = rospy.get_param('~max_age')
-    return (camera_topic, detection_topic, tracker_topic, cost_threhold, max_age, min_hits)
 
-
+CLASSES = {
+  1 : "Onion",
+  2 : "Weed",
+  3 : "unknown"
+}
+COLORS = {
+  1 : (0,255,0),
+  2: (0,0,255),
+  3: (255,0,0)
+}
 class MultiObjectTracker:
+
+
+    def get_parameters(self):
+        """
+        Gets the necessary parameters from .yaml file
+        Returns tuple
+        """
+        camera_topic = rospy.get_param("~camera_topic")
+        detection_topic = rospy.get_param("~detection_topic")
+        tracker_topic = rospy.get_param('~tracker_topic')
+        cost_threhold = rospy.get_param('~cost_threhold')
+        min_hits = rospy.get_param('~min_hits')
+        max_age = rospy.get_param('~max_age')
+        self.vis_detections = rospy.get_param('~visualize_detections')
+        self.vis_tracked_objects = rospy.get_param('~visualize_tracked_objects')
+        return (camera_topic, detection_topic, tracker_topic, cost_threhold, max_age, min_hits)
 
     def __init__(self):
 
-        (camera_topic, detection_topic, tracker_topic, cost_threshold, max_age, min_hits) = get_parameters()
+        (camera_topic, detection_topic, tracker_topic, cost_threshold, max_age, min_hits) = self.get_parameters()
         self.tracker = sort.Sort(max_age=max_age, min_hits=min_hits) #create instance of the SORT self.tracker
         self.cost_threshold = cost_threshold
 
@@ -53,20 +66,33 @@ class MultiObjectTracker:
         listDetections = []
         for detection in detectMsg.detections:
             bbox = detection.bbox
-            confidence = round(float(detection.results[0].score),2)
+            confidence = round(float(100*detection.results[0].score),2)
             listDetections.append(np.array([int(bbox.center.x-bbox.size_x), int(bbox.center.y-bbox.size_y), int(bbox.center.x+bbox.size_x), int(bbox.center.y+bbox.size_y), confidence]))
+
+
+        #scores_new = np.array([d.confidence for d in detections_new])
+        #indices = prep.non_max_suppression(boxes, 1.0 , scores_new)
+        #detections_new = [detections_new[i] for i in indices]
+
         detections = np.array(listDetections)
+        if(detections.shape[0] > 0):
+            boxes = detections[:,0:4]#np.array([d.tlwh for d in detections])
+            confidence = detections[:,4]
+
+            indices = prep.non_max_suppression(boxes, 0.5 , confidence)
+            detectionsFiltered = [detections[i] for i in indices]
+            detections = np.array(detectionsFiltered)
+
+        #print("detections filtered size: " + str(detections.shape[0]))
 
         if(len(detections) > 0):
             listTrackers = self.tracker.update(detections)
             arrayTrackers = np.array(listTrackers, dtype='int')
-            print("arrayTrackers")
-            print(arrayTrackers.shape)
             self.track = arrayTrackers
             self.msg.data = self.track
 
-        print("track")
-        print(self.track)
+        #print("track")
+        #print(self.track)
 
 
 
@@ -75,16 +101,18 @@ class MultiObjectTracker:
 
 
                     #TO DO: FIND BETTER AND MORE ACCURATE WAY TO SHOW BOUNDING BOXES!!
-        for i in range(detections.shape[0]):
-            cv2.rectangle(cv_rgb, (int(detections[i][0]), int(detections[i][1])), (int(detections[i][2]), int(detections[i][3])), (100, 255, 50), 1)
-            cv2.putText(cv_rgb , "person", (int(detections[i][0]), int(detections[i][1])), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (100, 255, 50), lineType=cv2.LINE_AA)
+        if self.vis_detections:
+            for i in range(detections.shape[0]):
+                cv2.rectangle(cv_rgb, (int(detections[i][0]), int(detections[i][1])), (int(detections[i][2]), int(detections[i][3])), (100, 255, 50), 1)
+                cv2.putText(cv_rgb , "person", (int(detections[i][0]), int(detections[i][1])), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (100, 255, 50), lineType=cv2.LINE_AA)
         #Tracker bounding box
-        for i in range(self.track.shape[0]):
-            cv2.rectangle(cv_rgb, (self.track[i][0], self.track[i][1]), (self.track[i][2], self.track[i][3]), (255, 255, 255), 1)
-            cv2.putText(cv_rgb , str(self.track[i][4]), (self.track[i][2], self.track[i][1]), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), lineType=cv2.LINE_AA)
+        if self.vis_tracked_objects:
+            for i in range(self.track.shape[0]):
+                cv2.rectangle(cv_rgb, (self.track[i][0], self.track[i][1]), (self.track[i][2], self.track[i][3]), (255, 255, 255), 1)
+                cv2.putText(cv_rgb , str(self.track[i][4]), (self.track[i][2], self.track[i][1]), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), lineType=cv2.LINE_AA)
         cv2.imshow("YOLO+SORT", cv_rgb)
         cv2.waitKey(3)
-        print("callback_image end")
+
 
         cv2.imshow("YOLO+SORT", cv_rgb)
         cv2.waitKey(3)
@@ -97,6 +125,8 @@ def main():
     print("Initialize ROS node")
     rospy.init_node('sort_tracker', anonymous=False)
     rate = rospy.Rate(10)
+    #rosTracker = [MultiObjectTracker() for i in range(CLASSES)]
+
     rosTracker = MultiObjectTracker()
     while not rospy.is_shutdown():
         rate.sleep()
