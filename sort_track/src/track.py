@@ -34,21 +34,23 @@ class MultiObjectTracker:
         Gets the necessary parameters from .yaml file
         Returns tuple
         """
-        camera_topic = rospy.get_param("~camera_topic")
-        detection_topic = rospy.get_param("~detection_topic")
-        tracker_topic = rospy.get_param('~tracker_topic')
-        cost_threhold = rospy.get_param('~cost_threhold')
-        min_hits = rospy.get_param('~min_hits')
-        max_age = rospy.get_param('~max_age')
+        self.camera_topic = rospy.get_param("~camera_topic")
+        self.detection_topic = rospy.get_param("~detection_topic")
+        self.tracker_topic = rospy.get_param('~tracker_topic')
+        self.cost_threshold = rospy.get_param('~cost_threhold')
+        self.min_hits = rospy.get_param('~min_hits')
+        self.max_age = rospy.get_param('~max_age')
         self.vis_detections = rospy.get_param('~visualize_detections')
         self.vis_tracked_objects = rospy.get_param('~visualize_tracked_objects')
-        return (camera_topic, detection_topic, tracker_topic, cost_threhold, max_age, min_hits)
+
 
     def __init__(self):
 
-        (camera_topic, detection_topic, tracker_topic, cost_threshold, max_age, min_hits) = self.get_parameters()
-        self.tracker = sort.Sort(max_age=max_age, min_hits=min_hits) #create instance of the SORT self.tracker
-        self.cost_threshold = cost_threshold
+        self.get_parameters()
+        self.tracker = {}
+        for i in CLASSES.keys():
+            self.tracker[i] = sort.Sort(max_age=self.max_age, min_hits=self.min_hits) #create instance of the SORT self.tracker
+
 
         self.track = np.array([])
 
@@ -57,27 +59,19 @@ class MultiObjectTracker:
         self.tss = TimeSynchronizer([self.detect_sub,self.image_sub], 100)
         self.tss.registerCallback(self.SyncedCallback)
 
-        self.pub_trackers = rospy.Publisher(tracker_topic, IntList, queue_size=10)
+        self.pub_trackers = rospy.Publisher(self.tracker_topic, IntList, queue_size=10)
         self.msg = IntList()
 
+    # this takes all detections, separates these per label, perform data processing and tracking
+    def ProcessAndTrack(self,detectMsg):
+        self.sortedDetections = {} # Raw detections separated per label before filtering. This will be used for mostly debugging the filtering step
+        self.detectSortedFilt = {} # Detections after filtering separated per label. This is the input to the tracker. These detection must be "visually correct" with objects that require tracking
+        trackedObjLoc = {} # output, nu
 
-    def SyncedCallback(self,detectMsg, imageMsg):
-
-        print("callback")
-        #listDetections = []
-        #listDetections = [list(np.array()) for i in range(CLASSES)]
         listDetections = dict()
+        for i in CLASSES.keys():
+            listDetections[i] = list(np.array([]))
 
-        #for i in CLASSES.keys():
-        #    listDetections[i] = list(np.array([]))
-
-        listDetections[i] = [list(np.array([])) for i in CLASSES.keys()]
-        print(listDetections)
-
-
-
-        print(type(listDetections))
-        print(listDetections)
         for detection in detectMsg.detections:
             bbox = detection.bbox
             label = int(detection.results[0].id)
@@ -87,47 +81,68 @@ class MultiObjectTracker:
             listDetections[label].append(npDetection)
 
 
-        #scores_new = np.array([d.confidence for d in detections_new])
-        #indices = prep.non_max_suppression(boxes, 1.0 , scores_new)
-        #detections_new = [detections_new[i] for i in indices]
-        detections = {}
-        detections = np.array(listDetections)
+        for idxLbl in CLASSES.keys():
+            self.sortedDetections[idxLbl] = np.array(listDetections[idxLbl])
+            #print("converted")
+            #print(self.sortedDetections[idxLbl])
 
-        if(detections.shape[0] > 0):
-            boxes = detections[:,0:4]#np.array([d.tlwh for d in detections])
-            confidence = detections[:,4]
+        #for i in sortedDetections:
+        #    print(i)
+        #    print(sortedDetections[i])
 
-            indices = prep.non_max_suppression(boxes, 0.9 , confidence)
-            detectionsFiltered = [detections[i] for i in indices]
-            detections = np.array(detectionsFiltered)
+        for idxLbl in CLASSES.keys():
+            detectionsRaw = self.sortedDetections[idxLbl]
+            #print("non max" )
+            #print(detectionsRaw )
 
-        #print("detections filtered size: " + str(detections.shape[0]))
+            if(detectionsRaw.shape[0] > 0):
+                boxes = detectionsRaw[:,0:4]
+                confidence = detectionsRaw[:,4]
+                indices = prep.non_max_suppression(boxes, 0.7 , confidence)
+                detectionsFilteredTmp = [detectionsRaw[i] for i in indices]
+                self.detectSortedFilt[idxLbl] = np.array(detectionsFilteredTmp)
+                print("filtering from {0} to {1}".format(detectionsRaw.shape[0],self.detectSortedFilt[idxLbl].shape[0]))
+                #print("filtering of " + str(idxLbl))
+                #print("filtered from: " + str(detectionsRaw) +str(len(self.detectSortedFilt[idxLbl])))
+                #print()
+            else:
+                print("empty" + str(idxLbl))
+                self.detectSortedFilt[idxLbl] = np.array([]) # empty
+            #print("detections filtered size: " + str(detections.shape[0]))
 
-        if(len(detections) > 0):
-            listTrackers = self.tracker.update(detections)
-            arrayTrackers = np.array(listTrackers, dtype='int')
-            self.track = arrayTrackers
-            self.msg.data = self.track
+            if(len(self.detectSortedFilt[idxLbl]) > 0): #if has detections. why does it needs to have detections?? please try to remove this
+                trackingInfo = self.tracker[idxLbl].update(self.detectSortedFilt[idxLbl])
+                trackedObjLoc[idxLbl] = np.array(trackingInfo, dtype='int')
+                #print("update idx:  " +str(idxLbl) + str(trackedObjLoc[idxLbl]))
+            else:
+                trackedObjLoc[idxLbl] = np.array([])
 
-        #print("track")
-        #print(self.track)
+        return trackedObjLoc
 
 
+    def SyncedCallback(self,detectMsg, imageMsg):
 
+        print("callback")
+        trackedObject = self.ProcessAndTrack(detectMsg)
+        #Image processing
         np_arr = np.fromstring(imageMsg.data, np.uint8)
         cv_rgb = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
 
                     #TO DO: FIND BETTER AND MORE ACCURATE WAY TO SHOW BOUNDING BOXES!!
         if self.vis_detections:
-            for i in range(detections.shape[0]):
-                cv2.rectangle(cv_rgb, (int(detections[i][0]), int(detections[i][1])), (int(detections[i][2]), int(detections[i][3])), COLORS[detections[i][5]], 1)
-                cv2.putText(cv_rgb , CLASSES[detections[i][5]], (int(detections[i][0]), int(detections[i][1])), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (100, 255, 50), lineType=cv2.LINE_AA)
+            for idxLbl in CLASSES.keys():
+                detections = self.detectSortedFilt[idxLbl]
+                for i in range(detections.shape[0]):
+                    cv2.rectangle(cv_rgb, (int(detections[i][0]), int(detections[i][1])), (int(detections[i][2]), int(detections[i][3])), COLORS[detections[i][5]], 1)
+                    cv2.putText(cv_rgb , CLASSES[detections[i][5]], (int(detections[i][0]), int(detections[i][1])), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (100, 255, 50), lineType=cv2.LINE_AA)
         #Tracker bounding box
         if self.vis_tracked_objects:
-            for i in range(self.track.shape[0]):
-                cv2.rectangle(cv_rgb, (self.track[i][0], self.track[i][1]), (self.track[i][2], self.track[i][3]), (255, 255, 255), 1)
-                cv2.putText(cv_rgb , str(self.track[i][4]), (self.track[i][2], self.track[i][3]), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), lineType=cv2.LINE_AA)
+            for idxLbl in CLASSES.keys():
+                track = trackedObject[idxLbl]
+                for i in range(track.shape[0]):
+                    cv2.rectangle(cv_rgb, (track[i][0], track[i][1]), (track[i][2], track[i][3]), (255, 255, 255), 1)
+                    cv2.putText(cv_rgb , str(track[i][4]), (track[i][2], track[i][3]), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), lineType=cv2.LINE_AA)
         cv2.imshow("YOLO+SORT", cv_rgb)
         cv2.waitKey(3)
 
@@ -135,7 +150,7 @@ class MultiObjectTracker:
         cv2.imshow("YOLO+SORT", cv_rgb)
         cv2.waitKey(3)
         #print(msg) #Testing msg that is published
-        self.pub_trackers.publish(self.msg)
+        #self.pub_trackers.publish(self.msg)
 
 
 
@@ -143,9 +158,7 @@ def main():
     print("Initialize ROS node")
     rospy.init_node('sort_tracker', anonymous=False)
     rate = rospy.Rate(10)
-    rosTracker = {}
-    for i in CLASSES.keys():
-        rosTracker[i] = MultiObjectTracker()
+    rosTracker = MultiObjectTracker()
 
     #print(type(rosTracker))
     #print(rosTracker)
