@@ -102,9 +102,19 @@ class KalmanBoxTracker(object):
     self.id = KalmanBoxTracker.count
     KalmanBoxTracker.count += 1
     self.history = []
-    self.hits = 0
-    self.hit_streak = 0
-    self.age = 0
+    self.hits = 1
+    self.hit_streak = 1
+    self.age = 1
+    self.realObject = False
+    self.realObjectId = -1
+    self.score = 1
+
+  #def ClassifyAsReal(self, min_detections, min_detection_rate):
+  #    if ( (self.realObject == 0) and (self.hits > min_detections) and (self.hits/self.age > min_detection_rate) ):
+  #        self.realObject = 1
+  #        return True
+  #    else:
+  #        return False
 
   def update(self,bbox):
     """
@@ -136,23 +146,44 @@ class KalmanBoxTracker(object):
     """
     return convert_x_to_bbox(self.kf.x)
 
+def linear_assignment(cost_matrix):
+  try:
+    import lap
+    _, x, y = lap.lapjv(cost_matrix, extend_cost=True)
+    return np.array([[y[i], i] for i in x if i >= 0])
+  except ImportError:
+    from scipy.optimize import linear_sum_assignment
+    x, y = linear_sum_assignment(cost_matrix)
+    return np.array(list(zip(x, y)))
+
 def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
   """
   Assigns detections to tracked object (both represented as bounding boxes)
 
   Returns 3 lists of matches, unmatched_detections and unmatched_trackers
   """
+  #print("th: " +str(iou_threshold))
   if(len(trackers)==0):
     return np.empty((0,2),dtype=int), np.arange(len(detections)), np.empty((0,5),dtype=int)
   iou_matrix = np.zeros((len(detections),len(trackers)),dtype=np.float32)
+  #print(iou_matrix.shape)
 
   for d,det in enumerate(detections):
     for t,trk in enumerate(trackers):
       iou_matrix[d,t] = iou(det,trk)
   #print(-iou_matrix)
+  #opt1
   #matched_indices = linear_assignment(-iou_matrix)
+
+  #opt2
+  #matched_indices = linear_sum_assignment(-iou_matrix)
+  #matched_indices = np.array(list(zip(*matched_indices)))
+
+  #opt3
   matched_indices = linear_sum_assignment(-iou_matrix)
   matched_indices = np.array(list(zip(*matched_indices)))
+  matched_indices.shape = (-1, 2)
+
 
 
   unmatched_detections = []
@@ -182,7 +213,7 @@ def associate_detections_to_trackers(detections,trackers,iou_threshold = 0.3):
 
 
 class Sort(object):
-  def __init__(self,max_age=1,min_hits=3):
+  def __init__(self,max_age=1,min_hits=3, IOU_th_association=0.3, VerifyByDetectionRate=False):
     """
     Sets key parameters for SORT
     """
@@ -190,6 +221,19 @@ class Sort(object):
     self.min_hits = min_hits
     self.trackers = []
     self.frame_count = 0
+    self.IOU_th_association = IOU_th_association
+    self.VerifyByDetectionRate = VerifyByDetectionRate
+    self.minDetectionRate = 0.2
+    self.realObjectsCounter = 0
+
+  def ClassifyAsReal(self,trk):
+      if( trk.realObject == False): #if wasnt considered a "real object" before
+          trk.realObject = True # Now it is!
+          self.realObjectsCounter = self.realObjectsCounter +1 # Increase counter,
+          trk.realObjectId = self.realObjectsCounter # Assign unique ID
+          print("Found new object, id: " +str(trk.realObjectId))
+          print("Total real objects: " +str(self.realObjectsCounter) )
+
 
   def update(self,dets):
     """
@@ -206,6 +250,7 @@ class Sort(object):
     trks = np.zeros((len(self.trackers),5))
     to_del = []
     ret = []
+    retUnreliable = []
     for t,trk in enumerate(trks):
       pos = self.trackers[t].predict()[0]
       trk[:] = [pos[0], pos[1], pos[2], pos[3], 0]
@@ -215,7 +260,7 @@ class Sort(object):
     for t in reversed(to_del):
       self.trackers.pop(t)
     #print("sort 210")
-    matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets,trks)
+    matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets,trks, self.IOU_th_association)
 
     #update matched trackers with assigned detections
     for t,trk in enumerate(self.trackers):
@@ -230,15 +275,40 @@ class Sort(object):
     i = len(self.trackers)
     for trk in reversed(self.trackers):
         d = trk.get_state()[0]
-        if((trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits)):
-          ret.append(np.concatenate((d,[trk.id+1])).reshape(1,-1)) # +1 as MOT benchmark requires positive
-        i -= 1
+        #if((trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits)):
+        if(self.VerifyByDetectionRate):
+            #print("daniels verifier")
+            detectionRate = trk.hits/(trk.age)
+            trk.score = 100*detectionRate
+            #print("detectionRate: " + str( detectionRate))
+            if( (trk.time_since_update < self.max_age) and (trk.hits >= self.min_hits) and (detectionRate > self.minDetectionRate) ): #Update suggested by daniel
+              self.ClassifyAsReal(trk)
+              ret.append(np.concatenate((d,[trk.realObjectId,trk.score])).reshape(1,-1)) # +1 as MOT benchmark requires positive
+            else:
+                trk.score = trk.hit_streak
+                retUnreliable.append(np.concatenate((d,[trk.id+1,trk.realObjectId,trk.score],)).reshape(1,-1)) # +1 as MOT benchmark requires positive
+            i -= 1
+        else:
+            #print("vanilla")
+            trk.score = trk.hit_streak
+            if((trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits)): #Vanilla update strategy
+              self.ClassifyAsReal(trk)
+              ret.append(np.concatenate((d,[trk.id+1,trk.realObjectId,trk.score])).reshape(1,-1)) # +1 as MOT benchmark requires positive
+            else:
+              retUnreliable.append(np.concatenate((d,[trk.id+1,trk.realObjectId,trk.score])).reshape(1,-1)) # +1 as MOT benchmark requires positive
+            i -= 1
         #remove dead tracklet
         if(trk.time_since_update > self.max_age):
           self.trackers.pop(i)
+
+    if( len(retUnreliable) > 0 ):
+        retUnreliable = np.concatenate(retUnreliable)
+    else:
+        retUnreliable = np.empty((0,5))
+
     if(len(ret)>0):
-      return np.concatenate(ret)
-    return np.empty((0,5))
+      return np.concatenate(ret), self.realObjectsCounter, retUnreliable
+    return np.empty((0,5)), self.realObjectsCounter, retUnreliable
     
 def parse_args():
     """Parse input arguments."""

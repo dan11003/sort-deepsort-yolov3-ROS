@@ -14,11 +14,19 @@ cost_threhold: 15
 # min_hits
 min_hits: 5
 
-visualize_detections: true
+visualize_raw_detections: false
+visualize_filtered_detections: false
 visualize_tracked_objects: true
+visualize_unreliable_objects: false
+
+
+non_max_suppression_th: 0.6
+
 
 # max age
-max_age: 20
+max_age: 15
+IOU_th_association: 0.5 #For tracking Needs to be fairly low to provide robustness to difference in bounding box size
+VerifyByDetectionRate: true
 
 image_view:
 
